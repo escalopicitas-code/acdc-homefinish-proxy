@@ -2,7 +2,22 @@ const express = require("express");
 
 const app = express();
 const port = process.env.PORT || 8080;
-const allowedHosts = new Set(["homefinish.com.br", "www.homefinish.com.br"]);
+
+// Hosts liberados por padrão. Pode acrescentar outros no env ALLOWED_PROXY_HOSTS:
+// Ex.: ALLOWED_PROXY_HOSTS=www.moveisgottems.com.br,moveisgottems.com.br
+const defaultAllowedHosts = [
+  "homefinish.com.br",
+  "www.homefinish.com.br",
+  "moveisgottems.com.br",
+  "www.moveisgottems.com.br"
+];
+
+const extraAllowedHosts = (process.env.ALLOWED_PROXY_HOSTS || "")
+  .split(",")
+  .map((value) => value.trim().toLowerCase())
+  .filter(Boolean);
+
+const allowedHosts = new Set([...defaultAllowedHosts, ...extraAllowedHosts]);
 
 function isAuthorized(req) {
   const expected = process.env.PROXY_KEY || "";
@@ -25,7 +40,9 @@ function parseTarget(rawUrl) {
   return target;
 }
 
-function requestHeaders(mode) {
+function requestHeaders(target, mode) {
+  const origin = `${target.protocol}//${target.hostname}/`;
+
   return {
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
@@ -36,7 +53,7 @@ function requestHeaders(mode) {
     "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
-    "Referer": "https://www.homefinish.com.br/",
+    "Referer": origin,
     "Upgrade-Insecure-Requests": "1"
   };
 }
@@ -56,7 +73,11 @@ async function fetchWithTimeout(url, options, timeoutMs) {
 }
 
 app.get("/health", (req, res) => {
-  res.status(200).json({ ok: true, service: "acdc-homefinish-proxy" });
+  res.status(200).json({
+    ok: true,
+    service: "acdc-relay",
+    allowed_hosts: Array.from(allowedHosts)
+  });
 });
 
 app.get("/fetch", async (req, res) => {
@@ -78,13 +99,15 @@ app.get("/fetch", async (req, res) => {
       target.toString(),
       {
         method: "GET",
-        headers: requestHeaders(mode),
+        headers: requestHeaders(target, mode),
         redirect: "follow"
       },
       mode === "image" ? 30000 : 60000
     );
 
-    const contentType = upstream.headers.get("content-type") || (mode === "image" ? "application/octet-stream" : "text/html; charset=utf-8");
+    const contentType =
+      upstream.headers.get("content-type") ||
+      (mode === "image" ? "application/octet-stream" : "text/html; charset=utf-8");
     const body = Buffer.from(await upstream.arrayBuffer());
 
     res.setHeader("Content-Type", contentType);
@@ -100,9 +123,9 @@ app.get("/fetch", async (req, res) => {
 });
 
 app.get("/", (req, res) => {
-  res.status(200).send("ACDC Home Finish relay online");
+  res.status(200).send("ACDC relay online");
 });
 
 app.listen(port, () => {
-  console.log(`ACDC Home Finish relay running on port ${port}`);
+  console.log(`ACDC relay running on port ${port}`);
 });
